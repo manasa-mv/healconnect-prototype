@@ -1,0 +1,365 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https: 'unsafe-inline' 'unsafe-eval' data:;">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HealConnect Prototype - Electron</title>
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- React + ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+    <!-- Babel for in-browser JSX transpile (development/demo only) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+      html,body,#root { height: 100%; }
+    </style>
+  </head>
+  <body class="antialiased">
+    <div id="root"></div>
+
+    <!-- App code: type text/babel so Babel transpiles JSX -->
+    <script type="text/babel">
+
+const { useState, useEffect, useRef } = React;
+
+function HealConnectPrototype() {
+  const initialPatients = [
+    {
+      id: "P001",
+      name: "Asha R.",
+      age: 68,
+      bed: "Ward 2 - Bed 5",
+      avatar: "AR",
+      vitals: { hr: 76, spo2: 98, bpSys: 125, bpDia: 80, temp: 36.7 },
+      status: "stable",
+    },
+    {
+      id: "P002",
+      name: "Ravi K.",
+      age: 57,
+      bed: "Ward 1 - Bed 2",
+      avatar: "RK",
+      vitals: { hr: 102, spo2: 93, bpSys: 148, bpDia: 92, temp: 37.9 },
+      status: "monitor",
+    },
+    {
+      id: "P003",
+      name: "Meera S.",
+      age: 45,
+      bed: "Home",
+      avatar: "MS",
+      vitals: { hr: 55, spo2: 88, bpSys: 90, bpDia: 60, temp: 35.9 },
+      status: "monitor",
+    },
+  ];
+
+  const [patients, setPatients] = useState(initialPatients);
+  const [selected, setSelected] = useState(initialPatients[0]);
+  const [alerts, setAlerts] = useState([]);
+  const [simRunning, setSimRunning] = useState(true);
+  const [filter, setFilter] = useState("all");
+  const nextAlertId = useRef(1);
+
+  const thresholds = {
+    hr: { low: 50, high: 110 },
+    spo2: { low: 92 },
+    bpSys: { high: 140, low: 90 },
+    temp: { high: 38.0, low: 35.5 },
+  };
+
+  function checkVitalsAndAlert(patient) {
+    const v = patient.vitals;
+    const issues = [];
+    if (v.hr < thresholds.hr.low) issues.push(`Low HR (${v.hr} bpm)`);
+    if (v.hr > thresholds.hr.high) issues.push(`High HR (${v.hr} bpm)`);
+    if (v.spo2 < thresholds.spo2.low) issues.push(`Low SpO₂ (${v.spo2}%)`);
+    if (v.bpSys > thresholds.bpSys.high) issues.push(`High BP (${v.bpSys}/${v.bpDia})`);
+    if (v.bpSys < thresholds.bpSys.low) issues.push(`Low BP (${v.bpSys}/${v.bpDia})`);
+    if (v.temp > thresholds.temp.high) issues.push(`High Temp (${v.temp.toFixed(1)}°C)`);
+    if (v.temp < thresholds.temp.low) issues.push(`Low Temp (${v.temp.toFixed(1)}°C)`);
+    return issues;
+  }
+
+  function pushAlert(patient, messages) {
+    const id = nextAlertId.current++;
+    const alert = {
+      id,
+      patientId: patient.id,
+      patientName: patient.name,
+      time: new Date().toLocaleTimeString(),
+      messages,
+      acknowledged: false,
+    };
+    setAlerts((a) => [alert, ...a].slice(0, 20));
+  }
+
+  useEffect(() => {
+    if (!simRunning) return;
+    const timer = setInterval(() => {
+      setPatients((prev) => {
+        return prev.map((p) => {
+          const newVitals = { ...p.vitals };
+          newVitals.hr = Math.max(30, Math.min(180, Math.round(newVitals.hr + (Math.random() - 0.5) * 6)));
+          newVitals.spo2 = Math.max(75, Math.min(100, Math.round(newVitals.spo2 + (Math.random() - 0.5) * 2)));
+          newVitals.bpSys = Math.max(70, Math.min(200, Math.round(newVitals.bpSys + (Math.random() - 0.5) * 6)));
+          newVitals.bpDia = Math.max(40, Math.min(130, Math.round(newVitals.bpDia + (Math.random() - 0.5) * 4)));
+          newVitals.temp = Math.round((newVitals.temp + (Math.random() - 0.5) * 0.4) * 10) / 10;
+
+          const updated = { ...p, vitals: newVitals };
+          const issues = checkVitalsAndAlert(updated);
+          if (issues.length) {
+            pushAlert(updated, issues);
+            updated.status = "critical";
+          } else {
+            updated.status = "stable";
+          }
+          return updated;
+        });
+      });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [simRunning]);
+
+  const visiblePatients = patients.filter((p) => {
+    if (filter === "all") return true;
+    if (filter === "critical") return p.status === "critical";
+    if (filter === "stable") return p.status === "stable";
+    return true;
+  });
+
+  function acknowledgeAlert(id) {
+    setAlerts((a) => a.map((al) => (al.id === id ? { ...al, acknowledged: true } : al)));
+  }
+
+  function selectPatient(p) {
+    setSelected(p);
+  }
+
+  function triggerManualAlert(type) {
+    const p = selected;
+    if (!p) return;
+    const updatedPatients = patients.map((pt) => {
+      if (pt.id !== p.id) return pt;
+      const nv = { ...pt.vitals };
+      if (type === "tachy") nv.hr += 40;
+      if (type === "brady") nv.hr = Math.max(30, nv.hr - 30);
+      if (type === "hypoxia") nv.spo2 = Math.max(70, nv.spo2 - 20);
+      if (type === "fever") nv.temp += 2.0;
+      return { ...pt, vitals: nv };
+    });
+    setPatients(updatedPatients);
+  }
+
+  function PatientCard({ p, onClick }) {
+    const danger = p.status === "critical";
+    return (
+      <div
+        onClick={() => onClick(p)}
+        className={`flex items-center gap-3 p-3 rounded-lg shadow-sm hover:shadow-md cursor-pointer transition-colors ${danger ? "bg-red-50 border border-red-200" : "bg-white"}`}
+      >
+        <div className="w-12 h-12 rounded-full bg-indigo-600 text-white flex items-center justify-center font-semibold">{p.avatar}</div>
+        <div className="flex-1">
+          <div className="flex justify-between">
+            <div className="font-medium">{p.name}</div>
+            <div className="text-sm text-gray-500">{p.bed}</div>
+          </div>
+          <div className="text-xs text-gray-600">HR {p.vitals.hr} • SpO₂ {p.vitals.spo2}% • BP {p.vitals.bpSys}/{p.vitals.bpDia}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-6xl mx-auto grid grid-cols-12 gap-6">
+        <div className="col-span-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold">HealConnect</h2>
+            <div className="text-sm text-gray-600">Demo prototype</div>
+          </div>
+
+          <div className="mb-3 flex gap-2">
+            <button className={`px-3 py-1 rounded ${filter === 'all' ? 'bg-indigo-600 text-white' : 'bg-white'}`} onClick={() => setFilter('all')}>All</button>
+            <button className={`px-3 py-1 rounded ${filter === 'critical' ? 'bg-red-600 text-white' : 'bg-white'}`} onClick={() => setFilter('critical')}>Critical</button>
+            <button className={`px-3 py-1 rounded ${filter === 'stable' ? 'bg-green-600 text-white' : 'bg-white'}`} onClick={() => setFilter('stable')}>Stable</button>
+            <div className="ml-auto text-sm text-gray-500">Simulation: <span className="font-medium">{simRunning ? 'On' : 'Off'}</span></div>
+            <button onClick={() => setSimRunning((s) => !s)} className="ml-2 px-2 py-1 rounded bg-gray-100">Toggle</button>
+          </div>
+
+          <div className="space-y-2">
+            {visiblePatients.map((p) => (
+              <PatientCard key={p.id} p={p} onClick={selectPatient} />
+            ))}
+          </div>
+
+          <div className="mt-6 p-3 bg-white rounded shadow-sm">
+            <div className="text-sm font-semibold mb-2">Recent Alerts</div>
+            {alerts.length === 0 && <div className="text-xs text-gray-500">No alerts (yet)</div>}
+            <div className="space-y-2 max-h-40 overflow-auto">
+              {alerts.map((al) => (
+                <div key={al.id} className={`p-2 rounded ${al.acknowledged ? 'bg-gray-100' : 'bg-yellow-50'} border` }>
+                  <div className="flex justify-between text-sm">
+                    <div><span className="font-medium">{al.patientName}</span> — {al.messages.join(', ')}</div>
+                    <div className="text-xs text-gray-500">{al.time}</div>
+                  </div>
+                  <div className="mt-1 flex gap-2">
+                    {!al.acknowledged && <button onClick={() => acknowledgeAlert(al.id)} className="text-xs px-2 py-0.5 rounded bg-indigo-600 text-white">Acknowledge</button>}
+                    <button onClick={() => setSelected(patients.find(x=>x.id===al.patientId))} className="text-xs px-2 py-0.5 rounded bg-white border">View</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="col-span-8">
+          <div className="bg-white rounded shadow p-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-full bg-indigo-600 text-white flex items-center justify-center text-lg font-bold">{selected?.avatar}</div>
+                <div>
+                  <div className="text-xl font-semibold">{selected?.name}</div>
+                  <div className="text-sm text-gray-500">{selected?.age} yrs • {selected?.bed}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-right text-sm">
+                  <div className="text-xs text-gray-500">Status</div>
+                  <div className={`font-semibold ${selected?.status === 'critical' ? 'text-red-600' : 'text-green-600'}`}>{selected?.status}</div>
+                </div>
+                <div>
+                  <button onClick={() => triggerManualAlert('tachy')} className="px-3 py-2 rounded bg-red-500 text-white text-sm">Sim Tachy</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 grid grid-cols-3 gap-6">
+              <div className="col-span-2">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-gray-50 rounded">
+                    <div className="text-sm text-gray-600 mb-2">Heart Rate</div>
+                    <div className="text-3xl font-bold">{selected?.vitals.hr} <span className="text-base">bpm</span></div>
+                    <div className="text-xs text-gray-500 mt-1">Normal: 50–110</div>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 rounded">
+                    <div className="text-sm text-gray-600 mb-2">SpO₂</div>
+                    <div className="text-3xl font-bold">{selected?.vitals.spo2}%</div>
+                    <div className="text-xs text-gray-500 mt-1">Normal ≥ 92%</div>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 rounded">
+                    <div className="text-sm text-gray-600 mb-2">Blood Pressure</div>
+                    <div className="text-2xl font-bold">{selected?.vitals.bpSys}/{selected?.vitals.bpDia} mmHg</div>
+                    <div className="text-xs text-gray-500 mt-1">Ideal: &lt;140/90</div>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 rounded">
+                    <div className="text-sm text-gray-600 mb-2">Temperature</div>
+                    <div className="text-2xl font-bold">{selected?.vitals.temp.toFixed(1)}°C</div>
+                    <div className="text-xs text-gray-500 mt-1">Normal: 36.1–37.2°C</div>
+                  </div>
+                </div>
+
+                <div className="mt-4 p-4 bg-white rounded shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold">Trend (last 10 readings)</div>
+                    <div className="text-xs text-gray-500">simulated</div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-3">
+                    <div className="p-3 border rounded text-sm">
+                      <div className="text-xs text-gray-500">Avg HR</div>
+                      <div className="font-semibold">{Math.round(selected?.vitals.hr ?? 0)}</div>
+                    </div>
+                    <div className="p-3 border rounded text-sm">
+                      <div className="text-xs text-gray-500">Avg SpO₂</div>
+                      <div className="font-semibold">{Math.round(selected?.vitals.spo2 ?? 0)}%</div>
+                    </div>
+                    <div className="p-3 border rounded text-sm">
+                      <div className="text-xs text-gray-500">Avg Temp</div>
+                      <div className="font-semibold">{(selected?.vitals.temp ?? 0).toFixed(1)}°C</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 p-4 bg-white rounded shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold">Actions</div>
+                    <div className="text-xs text-gray-500">clinician controls</div>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button onClick={() => triggerManualAlert('tachy')} className="px-3 py-2 rounded bg-red-500 text-white text-sm">Trigger Tachy</button>
+                    <button onClick={() => triggerManualAlert('hypoxia')} className="px-3 py-2 rounded bg-yellow-500 text-white text-sm">Trigger Hypoxia</button>
+                    <button onClick={() => triggerManualAlert('fever')} className="px-3 py-2 rounded bg-orange-500 text-white text-sm">Trigger Fever</button>
+                    <button onClick={() => alert('Send message to on-duty nurse (demo)')} className="px-3 py-2 rounded bg-indigo-600 text-white text-sm">Message Nurse</button>
+                  </div>
+                </div>
+
+              </div>
+
+              <div>
+                <div className="p-4 bg-white rounded shadow-sm">
+                  <div className="font-semibold text-sm mb-2">Patient Info</div>
+                  <div className="text-sm text-gray-700">ID: {selected?.id}</div>
+                  <div className="text-sm text-gray-700">Age: {selected?.age}</div>
+                  <div className="text-sm text-gray-700">Location: {selected?.bed}</div>
+                  <div className="text-sm text-gray-700 mt-2">Notes: Post-op monitoring. Use oxygen if SpO₂ &lt; 92%.</div>
+                </div>
+
+                <div className="mt-4 p-4 bg-white rounded shadow-sm">
+                  <div className="font-semibold text-sm mb-2">Device Status</div>
+                  <div className="text-sm text-gray-700">Last sync: {new Date().toLocaleTimeString()}</div>
+                  <div className="text-sm text-gray-700">Battery: 84%</div>
+                </div>
+
+                <div className="mt-4 p-4 bg-white rounded shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold text-sm">Manual Controls</div>
+                    <button onClick={() => setPatients((ps)=>ps.map(p=>p.id===selected.id?{...p,vitals:{...p.vitals, spo2:98, hr:78, bpSys:120, bpDia:78, temp:36.6}}:p))} className="text-xs px-2 py-1 bg-gray-100 rounded">Reset Vitals</button>
+                  </div>
+                  <div className="mt-3 text-xs text-gray-500">You can reset vitals to nominal values for demo.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="bg-white rounded shadow p-4">
+              <div className="font-semibold mb-2">Activity Log</div>
+              <div className="text-sm text-gray-600">Recent system events and alerts</div>
+              <div className="mt-3 max-h-36 overflow-auto space-y-2 text-sm">
+                {alerts.length===0 && <div className="text-gray-400">No activity yet.</div>}
+                {alerts.map((al)=> (
+                  <div key={al.id} className={`p-2 rounded ${al.acknowledged?'bg-gray-50':'bg-yellow-50'}`}>
+                    <div className="flex justify-between">
+                      <div>{al.time} — <span className="font-medium">{al.patientName}</span>: {al.messages.join(', ')}</div>
+                      <div className="text-xs text-gray-500">{al.acknowledged? 'Acknowledged': 'Unacknowledged'}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto mt-6 text-xs text-gray-500">Prototype: simulated device data, alert rules and simple clinician actions for demo/presentation purposes.</div>
+    </div>
+  );
+}
+
+// Render app
+const rootEl = document.getElementById('root');
+ReactDOM.createRoot(rootEl).render(<HealConnectPrototype />);
+
+    </script>
+  </body>
+</html>

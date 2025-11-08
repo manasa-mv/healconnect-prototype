@@ -1,0 +1,27 @@
+{
+  "name": "healconnect-prototype-electron",
+  "version": "1.0.0",
+  "description": "HealConnect Prototype - build via electron-builder (portable single exe)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable --x64"
+  },
+  "build": {
+    "appId": "com.healconnect.prototype",
+    "productName": "HealConnect Prototype",
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "directories": {
+      "buildResources": "build"
+    }
+  },
+  "devDependencies": {
+    "electron": "^25.2.0",
+    "electron-builder": "^24.7.0"
+  }
+}
